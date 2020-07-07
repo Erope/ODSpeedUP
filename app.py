@@ -9,6 +9,8 @@ import base64
 import time
 from werkzeug.middleware.proxy_fix import ProxyFix
 from flask_sqlalchemy import SQLAlchemy
+from furl import furl
+import re
 
 
 app = Flask(__name__)
@@ -135,6 +137,136 @@ def graphcall(path=None):
     return result
 
 
+@app.route("/driveItem/<string:DI>")
+def driveItem(DI):
+    token = _get_token_from_cache(app_config.SCOPE)
+    if not token:
+        return redirect(url_for("login"))
+    url = "https://graph.microsoft.com/v1.0/me/drive/items/%s/children" % DI
+    graph_data = requests.get(
+        url,
+        headers={'Authorization': 'Bearer ' + token['access_token']},
+        ).json()
+    try:
+        U = model.User.query.get(session.get('uid', -1))
+        if U is None or U.uid <= 1:
+            return redirect(url_for("index"))
+        db.session.commit()
+    except:
+        db.session.rollback()
+        return "数据库连接错误"
+    result = "<p>您当前已用流量: %.3f GB</p><p>" % (U.used / (1024 * 1024 * 1024))
+    for i in graph_data['value']:
+        if 'folder' in i:
+            result += herf % (url_for('driveItem', DI=i['id']), i['name'])
+        elif '@microsoft.graph.downloadUrl' in i:
+            md5 = hashlib.md5()
+            t = str(int(time.time()) + 60 * 60 * 8)
+            md5.update(t.encode(encoding='utf-8'))
+            if str(i['@microsoft.graph.downloadUrl']).find('?') != -1:
+                md5.update((i['@microsoft.graph.downloadUrl']+"&uid="+str(session.get('uid'))).encode(encoding='utf-8'))
+            else:
+                md5.update((i['@microsoft.graph.downloadUrl']+"?uid="+str(session.get('uid'))).encode(encoding='utf-8'))
+            md5.update(app_config.URL_DOWN_SECURE_KEY.encode(encoding='utf-8'))
+            h = base64.b64encode(md5.digest()).decode('utf-8').rstrip('=').replace('+', '-').replace('/', '_')
+            if str(i['@microsoft.graph.downloadUrl']).find('?') != -1:
+                u_l = "&uid="+str(session.get('uid'))+"&md5="+h+'&expires='+t
+            else:
+                u_l = "?uid="+str(session.get('uid'))+"&md5="+h+'&expires='+t
+            result += herf % ("https://bd.shinenet.cn/"+i['@microsoft.graph.downloadUrl']+u_l, i['name'])
+        else:
+            result += herf % ('', i['name'])
+    result += '</p>'
+    return result
+
+
+@app.route("/shares/<path:s_url>")
+def shares(s_url):
+    token = _get_token_from_cache(app_config.SCOPE)
+    if not token:
+        return redirect(url_for("login"))
+    s_url = base64.b64decode(s_url.encode('utf-8')).decode('utf-8')
+    # 获取到跳转链接
+    r = requests.get(s_url, allow_redirects=False)
+    t_url = r.headers['Location']
+    url_list = t_url.split('/')
+    ss = '/'.join(url_list[0:5])
+    f = furl(t_url)
+    full = f.args['id'].strip('/')
+    # 录入session
+    session['FedAuth'] = r.cookies.get_dict()['FedAuth']
+    return redirect(url_for('share_dir', host_head=ss.replace('/', '#'), dir=full))
+
+
+@app.route("/share_dir/<string:host_head>/<path:dir>")
+def share_dir(host_head, dir):
+    token = _get_token_from_cache(app_config.SCOPE)
+    if not token:
+        return redirect(url_for("login"))
+    ss = host_head.replace('#', '/')
+    full = '/' + dir
+    first = '/'.join(full.split('/')[0:4])
+    # 读取session
+    FedAuth = session.get('FedAuth')
+    cookies = {
+        'FedAuth': FedAuth
+    }
+    r_url = "%s/_api/web/GetListUsingPath(DecodedUrl=@a1)/RenderListDataAsStream?@a1='%s'&RootFolder=%s" % (
+    ss, first, full)
+    print(r_url)
+    h = {
+        'accept': 'application/json;odata=verbose',
+        'content-type': 'application/json;odata=verbose',
+    }
+    d = '{"parameters":{"__metadata":{"type":"SP.RenderListDataParameters"},"RenderOptions":1185543,"AllowMultipleValueFilterForTaxonomyFields":true,"AddRequiredFields":true}}'
+    graph_data = requests.post(r_url, data=d, headers=h, cookies=cookies).json()
+    print(requests.post(r_url, data=d, headers=h, cookies=cookies).text)
+    try:
+        U = model.User.query.get(session.get('uid', -1))
+        if U is None or U.uid <= 1:
+            return redirect(url_for("index"))
+        db.session.commit()
+    except:
+        db.session.rollback()
+        return "数据库连接错误"
+    result = "<p>您当前已用流量: %.3f GB</p><p>" % (U.used / (1024 * 1024 * 1024))
+    for i in graph_data['ListData']['Row']:
+        if i['FSObjType'] == '1':
+            result += herf % (url_for('share_dir', host_head=host_head, dir=dir+'/'+i['FileLeafRef']), i['FileLeafRef'])
+        else:
+            Item_url = i['.spItemUrl']
+            reg = "https://(.*)-my.sharepoint.com:443/_api/v2.0/drives/(.*)/items/(.*)?version=Published"
+            matchObj = re.match(reg, Item_url)
+            result += herf % (url_for('get_share_down', host_head=matchObj.group(1), dirver=matchObj.group(2), item=matchObj.group(3)), i['FileLeafRef'])
+    result += '</p>'
+    return result
+
+
+@app.route("/get_share_down/<string:host_head>/<string:dirver>/<string:item>")
+def get_share_down(host_head, dirver, item):
+    token = _get_token_from_cache(app_config.SCOPE)
+    if not token:
+        return redirect(url_for("login"))
+    # 读取session
+    FedAuth = session.get('FedAuth')
+    cookies = {
+        'FedAuth': FedAuth
+    }
+    h = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.116 Safari/537.36 Edg/83.0.478.58'}
+    r_url = "https://%s-my.sharepoint.com/_api/v2.0/drives/%s/items/%s?version=Published" % (host_head, dirver, item)
+    graph_data = requests.get(r_url, cookies=cookies, headers=h).json()
+    try:
+        U = model.User.query.get(session.get('uid', -1))
+        if U is None or U.uid <= 1:
+            return redirect(url_for("index"))
+        db.session.commit()
+    except:
+        db.session.rollback()
+        return "数据库连接错误"
+    result = "<p>您当前已用流量: %.3f GB</p><p>" % (U.used / (1024 * 1024 * 1024))
+    return redirect(_build_speedup_link(graph_data['@content.downloadUrl']))
+
+
 def _load_cache():
     cache = msal.SerializableTokenCache()
     if session.get("token_cache"):
@@ -164,6 +296,24 @@ def _get_token_from_cache(scope=None):
         result = cca.acquire_token_silent(scope, account=accounts[0])
         _save_cache(cache)
         return result
+
+
+def _build_speedup_link(link):
+    md5 = hashlib.md5()
+    t = str(int(time.time()) + 60 * 60 * 8)
+    md5.update(t.encode(encoding='utf-8'))
+    if str(link).find('?') != -1:
+        md5.update((link + "&uid=" + str(session.get('uid'))).encode(encoding='utf-8'))
+    else:
+        md5.update((link + "?uid=" + str(session.get('uid'))).encode(encoding='utf-8'))
+    md5.update(app_config.URL_DOWN_SECURE_KEY.encode(encoding='utf-8'))
+    h = base64.b64encode(md5.digest()).decode('utf-8').rstrip('=').replace('+', '-').replace('/', '_')
+    if str(link).find('?') != -1:
+        u_l = "&uid=" + str(session.get('uid')) + "&md5=" + h + '&expires=' + t
+    else:
+        u_l = "?uid=" + str(session.get('uid')) + "&md5=" + h + '&expires=' + t
+    return "https://bd.shinenet.cn/" + link + u_l
+
 
 app.jinja_env.globals.update(_build_auth_url=_build_auth_url)  # Used in template
 
