@@ -18,7 +18,7 @@ app.config.from_object(app_config)
 app.wsgi_app = ProxyFix(app.wsgi_app)
 db = SQLAlchemy()
 db.init_app(app)
-import model
+from model import *
 Session(app)
 
 herf = '''<a href="%s">%s</a><br>'''
@@ -56,11 +56,11 @@ def authorized():
         if len(result.get("id_token_claims").get("oid")) != 36:
             return "您的ID校验失败..."
         try:
-            u = model.User.query.filter_by(oid=result.get("id_token_claims").get("oid")).first()
+            u = User.query.filter_by(oid=result.get("id_token_claims").get("oid")).first()
             if u is None:
                 # 添加新用户
                 try:
-                    u = model.User()
+                    u = User()
                     u.oid = result.get("id_token_claims").get("oid")
                     db.session.add(u)
                     db.session.flush()
@@ -87,6 +87,7 @@ def logout():
         app_config.AUTHORITY + "/oauth2/v2.0/logout" +
         "?post_logout_redirect_uri=" + url_for("index", _external=True))
 
+
 @app.route("/graphcall/")
 @app.route("/graphcall/<path:path>")
 def graphcall(path=None):
@@ -104,14 +105,9 @@ def graphcall(path=None):
         url,
         headers={'Authorization': 'Bearer ' + token['access_token']},
         ).json()
-    try:
-        U = model.User.query.get(session.get('uid', -1))
-        if U is None or U.uid <= 1:
-            return redirect(url_for("index"))
-        db.session.commit()
-    except:
-        db.session.rollback()
-        return "数据库连接错误"
+    U = User.query.get(session.get('uid', -1))
+    if U is None or U.uid <= 1:
+        return redirect(url_for("index"))
     result = "<p>您当前已用流量: %.3f GB</p><p>" % (U.used / (1024 * 1024 * 1024))
     for i in graph_data['value']:
         if 'folder' in i:
@@ -148,7 +144,7 @@ def driveItem(DI):
         headers={'Authorization': 'Bearer ' + token['access_token']},
         ).json()
     try:
-        U = model.User.query.get(session.get('uid', -1))
+        U = User.query.get(session.get('uid', -1))
         if U is None or U.uid <= 1:
             return redirect(url_for("index"))
         db.session.commit()
@@ -222,7 +218,7 @@ def share_dir(host_head, dir):
     graph_data = requests.post(r_url, data=d, headers=h, cookies=cookies).json()
     print(requests.post(r_url, data=d, headers=h, cookies=cookies).text)
     try:
-        U = model.User.query.get(session.get('uid', -1))
+        U = User.query.get(session.get('uid', -1))
         if U is None or U.uid <= 1:
             return redirect(url_for("index"))
         db.session.commit()
@@ -256,7 +252,7 @@ def get_share_down(host_head, dirver, item):
     r_url = "https://%s-my.sharepoint.com/_api/v2.0/drives/%s/items/%s?version=Published" % (host_head, dirver, item)
     graph_data = requests.get(r_url, cookies=cookies, headers=h).json()
     try:
-        U = model.User.query.get(session.get('uid', -1))
+        U = User.query.get(session.get('uid', -1))
         if U is None or U.uid <= 1:
             return redirect(url_for("index"))
         db.session.commit()
@@ -316,6 +312,3 @@ def _build_speedup_link(link):
 
 
 app.jinja_env.globals.update(_build_auth_url=_build_auth_url)  # Used in template
-
-if __name__ == "__main__":
-    app.run(debug=True)
