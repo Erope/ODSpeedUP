@@ -36,7 +36,7 @@ def login():
     # Technically we could use empty list [] as scopes to do just sign in,
     # here we choose to also collect end user consent upfront
     auth_url = _build_auth_url(scopes=app_config.SCOPE, state=session["state"])
-    return render_template("login.html", auth_url=auth_url, version=msal.__version__)
+    return render_template("login.html", auth_url=auth_url)
 
 @app.route(app_config.REDIRECT_PATH)  # Its absolute URL must match your app's redirect_uri set in AAD
 def authorized():
@@ -113,20 +113,7 @@ def graphcall(path=None):
         if 'folder' in i:
             result += herf % (i['name'] + '/', i['name'])
         elif '@microsoft.graph.downloadUrl' in i:
-            md5 = hashlib.md5()
-            t = str(int(time.time()) + 60 * 60 * 8)
-            md5.update(t.encode(encoding='utf-8'))
-            if str(i['@microsoft.graph.downloadUrl']).find('?') != -1:
-                md5.update((i['@microsoft.graph.downloadUrl']+"&uid="+str(session.get('uid'))).encode(encoding='utf-8'))
-            else:
-                md5.update((i['@microsoft.graph.downloadUrl']+"?uid="+str(session.get('uid'))).encode(encoding='utf-8'))
-            md5.update(app_config.URL_DOWN_SECURE_KEY.encode(encoding='utf-8'))
-            h = base64.b64encode(md5.digest()).decode('utf-8').rstrip('=').replace('+', '-').replace('/', '_')
-            if str(i['@microsoft.graph.downloadUrl']).find('?') != -1:
-                u_l = "&uid="+str(session.get('uid'))+"&md5="+h+'&expires='+t
-            else:
-                u_l = "?uid="+str(session.get('uid'))+"&md5="+h+'&expires='+t
-            result += herf % ("https://bd.shinenet.cn/"+i['@microsoft.graph.downloadUrl']+u_l, i['name'])
+            result += herf % (_build_speedup_link(i['@microsoft.graph.downloadUrl']), i['name'])
         else:
             result += herf % ('', i['name'])
     result += '</p>'
@@ -156,20 +143,7 @@ def driveItem(DI):
         if 'folder' in i:
             result += herf % (url_for('driveItem', DI=i['id']), i['name'])
         elif '@microsoft.graph.downloadUrl' in i:
-            md5 = hashlib.md5()
-            t = str(int(time.time()) + 60 * 60 * 8)
-            md5.update(t.encode(encoding='utf-8'))
-            if str(i['@microsoft.graph.downloadUrl']).find('?') != -1:
-                md5.update((i['@microsoft.graph.downloadUrl']+"&uid="+str(session.get('uid'))).encode(encoding='utf-8'))
-            else:
-                md5.update((i['@microsoft.graph.downloadUrl']+"?uid="+str(session.get('uid'))).encode(encoding='utf-8'))
-            md5.update(app_config.URL_DOWN_SECURE_KEY.encode(encoding='utf-8'))
-            h = base64.b64encode(md5.digest()).decode('utf-8').rstrip('=').replace('+', '-').replace('/', '_')
-            if str(i['@microsoft.graph.downloadUrl']).find('?') != -1:
-                u_l = "&uid="+str(session.get('uid'))+"&md5="+h+'&expires='+t
-            else:
-                u_l = "?uid="+str(session.get('uid'))+"&md5="+h+'&expires='+t
-            result += herf % ("https://bd.shinenet.cn/"+i['@microsoft.graph.downloadUrl']+u_l, i['name'])
+            result += herf % (_build_speedup_link(i['@microsoft.graph.downloadUrl']), i['name'])
         else:
             result += herf % ('', i['name'])
     result += '</p>'
@@ -209,14 +183,12 @@ def share_dir(host_head, dir):
     }
     r_url = "%s/_api/web/GetListUsingPath(DecodedUrl=@a1)/RenderListDataAsStream?@a1='%s'&RootFolder=%s" % (
     ss, first, full)
-    print(r_url)
     h = {
         'accept': 'application/json;odata=verbose',
         'content-type': 'application/json;odata=verbose',
     }
     d = '{"parameters":{"__metadata":{"type":"SP.RenderListDataParameters"},"RenderOptions":1185543,"AllowMultipleValueFilterForTaxonomyFields":true,"AddRequiredFields":true}}'
     graph_data = requests.post(r_url, data=d, headers=h, cookies=cookies).json()
-    print(requests.post(r_url, data=d, headers=h, cookies=cookies).text)
     try:
         U = User.query.get(session.get('uid', -1))
         if U is None or U.uid <= 1:
@@ -251,15 +223,6 @@ def get_share_down(host_head, dirver, item):
     h = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.116 Safari/537.36 Edg/83.0.478.58'}
     r_url = "https://%s-my.sharepoint.com/_api/v2.0/drives/%s/items/%s?version=Published" % (host_head, dirver, item)
     graph_data = requests.get(r_url, cookies=cookies, headers=h).json()
-    try:
-        U = User.query.get(session.get('uid', -1))
-        if U is None or U.uid <= 1:
-            return redirect(url_for("index"))
-        db.session.commit()
-    except:
-        db.session.rollback()
-        return "数据库连接错误"
-    result = "<p>您当前已用流量: %.3f GB</p><p>" % (U.used / (1024 * 1024 * 1024))
     return redirect(_build_speedup_link(graph_data['@content.downloadUrl']))
 
 
@@ -308,7 +271,7 @@ def _build_speedup_link(link):
         u_l = "&uid=" + str(session.get('uid')) + "&md5=" + h + '&expires=' + t
     else:
         u_l = "?uid=" + str(session.get('uid')) + "&md5=" + h + '&expires=' + t
-    return "https://bd.shinenet.cn/" + link + u_l
+    return app_config.URL_DOWN_HOST + link + u_l
 
 
-app.jinja_env.globals.update(_build_auth_url=_build_auth_url)  # Used in template
+app.jinja_env.globals.update(_build_auth_url=_build_auth_url)
