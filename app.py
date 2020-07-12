@@ -10,6 +10,7 @@ import time
 from werkzeug.middleware.proxy_fix import ProxyFix
 from flask_sqlalchemy import SQLAlchemy
 from furl import furl
+from bs4 import BeautifulSoup
 import re
 
 
@@ -120,36 +121,6 @@ def graphcall(path=None):
     return result
 
 
-@app.route("/driveItem/<string:DI>")
-def driveItem(DI):
-    token = _get_token_from_cache(app_config.SCOPE)
-    if not token:
-        return redirect(url_for("login"))
-    url = "https://graph.microsoft.com/v1.0/me/drive/items/%s/children" % DI
-    graph_data = requests.get(
-        url,
-        headers={'Authorization': 'Bearer ' + token['access_token']},
-        ).json()
-    try:
-        U = User.query.get(session.get('uid', -1))
-        if U is None or U.uid <= 1:
-            return redirect(url_for("index"))
-        db.session.commit()
-    except:
-        db.session.rollback()
-        return "数据库连接错误"
-    result = "<p>您当前已用流量: %.3f GB</p><p>" % (U.used / (1024 * 1024 * 1024))
-    for i in graph_data['value']:
-        if 'folder' in i:
-            result += herf % (url_for('driveItem', DI=i['id']), i['name'])
-        elif '@microsoft.graph.downloadUrl' in i:
-            result += herf % (_build_speedup_link(i['@microsoft.graph.downloadUrl']), i['name'])
-        else:
-            result += herf % ('', i['name'])
-    result += '</p>'
-    return result
-
-
 @app.route("/shares/<path:s_url>")
 def shares(s_url):
     token = _get_token_from_cache(app_config.SCOPE)
@@ -165,7 +136,56 @@ def shares(s_url):
     full = f.args['id'].strip('/')
     # 录入session
     session['FedAuth'] = r.cookies.get_dict()['FedAuth']
-    return redirect(url_for('share_dir', host_head=ss.replace('/', '#'), dir=full))
+    return redirect(url_for('share_dir', host_head=ss.replace('/', '#').replace('https://', ''), dir=full))
+
+
+@app.route("/shares_person/<path:s_url>")
+def shares_person(s_url):
+    token = _get_token_from_cache(app_config.SCOPE)
+    if not token:
+        return redirect(url_for("login"))
+    s_url = base64.b64decode(s_url.encode('utf-8')).decode('utf-8')
+    s = requests.session()
+    r = s.get(s_url, allow_redirects=False)
+    url = r.headers['Location']
+    txt = s.get(url).text
+    soup = BeautifulSoup(txt, 'lxml')
+    full_url = str(soup.find('noscript').find('meta').get('content'))
+    # 取出url
+    url = full_url[6:]
+    f = furl(url)
+    cid = f.args['cid']
+    id = f.args['id']
+    authkey = f.args['authkey']
+    return redirect(url_for('share_dir_person', cid=cid, id=id, authkey=authkey))
+
+
+@app.route("/share_dir_person/<string:cid>/<string:id>/<string:authkey>")
+def share_dir_person(cid, id, authkey):
+    token = _get_token_from_cache(app_config.SCOPE)
+    if not token:
+        return redirect(url_for("login"))
+    url = "https://skyapi.onedrive.live.com/API/2/GetItems?caller=4A0A38E76EA967FA&sb=0&ps=100&sd=0&gb=0,1,2&d=1&m=zh-CN&iabch=1&pi=5&path=1&lct=1&rset=odweb&v=0.3431471585423471&urlType=0&si=0&authKey=%s&id=%s&cid=%s" % (
+    authkey, id, cid)
+    h = {
+        'appid': '1141147648',
+        'accept': 'application/json'
+    }
+    graph_data = requests.get(url, headers=h).json()
+    U = User.query.get(session.get('uid', -1))
+    if U is None or U.uid <= 1:
+        return redirect(url_for("index"))
+    result = "<p>您当前已用流量: %.3f GB</p><p>" % (U.used / (1024 * 1024 * 1024))
+    for i in graph_data['items'][0]['folder']['children']:
+        if 'folder' in i:
+            result += herf % (url_for('share_dir_person', cid=i['ownerCid'], id=i['id'], authkey=authkey), i['name'])
+        else:
+            # 对link做处理，替换掉尾部
+            d_url = i['urls']['download']
+            l = d_url.rfind('/')
+            result += herf % (_build_speedup_link(d_url[:l]), i['name']+i['extension'])
+    result += '</p>'
+    return result
 
 
 @app.route("/share_dir/<string:host_head>/<path:dir>")
@@ -181,7 +201,7 @@ def share_dir(host_head, dir):
     cookies = {
         'FedAuth': FedAuth
     }
-    r_url = "%s/_api/web/GetListUsingPath(DecodedUrl=@a1)/RenderListDataAsStream?@a1='%s'&RootFolder=%s" % (
+    r_url = "https://%s/_api/web/GetListUsingPath(DecodedUrl=@a1)/RenderListDataAsStream?@a1='%s'&RootFolder=%s" % (
     ss, first, full)
     h = {
         'accept': 'application/json;odata=verbose',
@@ -189,14 +209,10 @@ def share_dir(host_head, dir):
     }
     d = '{"parameters":{"__metadata":{"type":"SP.RenderListDataParameters"},"RenderOptions":1185543,"AllowMultipleValueFilterForTaxonomyFields":true,"AddRequiredFields":true}}'
     graph_data = requests.post(r_url, data=d, headers=h, cookies=cookies).json()
-    try:
-        U = User.query.get(session.get('uid', -1))
-        if U is None or U.uid <= 1:
-            return redirect(url_for("index"))
-        db.session.commit()
-    except:
-        db.session.rollback()
-        return "数据库连接错误"
+    U = User.query.get(session.get('uid', -1))
+    if U is None or U.uid <= 1:
+        return redirect(url_for("index"))
+    db.session.commit()
     result = "<p>您当前已用流量: %.3f GB</p><p>" % (U.used / (1024 * 1024 * 1024))
     for i in graph_data['ListData']['Row']:
         if i['FSObjType'] == '1':
