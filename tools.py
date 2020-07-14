@@ -61,4 +61,4 @@ def build_speedup_link(link):
 
 
 def abort_msg(status, msg):
-    abort(status, message={'status': status, 'msg': msg})
+    abort(status, status=status, msg=msg)

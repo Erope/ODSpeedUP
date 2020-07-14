@@ -9,3 +9,8 @@ def init_url():
 
     import LocalFiles.app
     api.add_resource(LocalFiles.app.LocalFiles, '/api/files/', '/api/files/<path:path>')
+
+    import ShareDir.app
+    api.add_resource(ShareDir.app.ShareDir, '/api/sharedir/<string:url>')
+    api.add_resource(ShareDir.app.OFB_DIR, '/api/ofbsharedir/<string:host_head>/<path:dir>')
+    api.add_resource(ShareDir.app.OFB_DIR_DOWN, '/api/ofbdown/<string:host_header>/<string:dirver>/<string:item>')
