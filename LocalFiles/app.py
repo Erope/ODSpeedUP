@@ -57,4 +57,4 @@ class LocalFiles(Resource):
             next = f.args['$skiptoken']
             return {'status': 200, 'data': result, 'skiptoken': next}
         else:
-            return {'status': 200, 'data': result}
+            return {'status': 200, 'data': result, 'skiptoken': False}

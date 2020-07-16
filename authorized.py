@@ -9,7 +9,7 @@ from tools import *
 class authorized(Resource):
     def get(self):
         if request.args.get('state') != session.get("state"):
-            abort_msg(400, '验证失败...如重新登录仍然出现此问题，请联系管理员...')
+            abort_msg(400, '请求登录的账户与最终登录的账户不符合...')
         if "error" in request.args:  # Authentication/Authorization failure
             abort_msg(400, '验证失败...下面是错误信息...    ' + request.args.get("error") + "    "
                       + request.args.get("error_description"))

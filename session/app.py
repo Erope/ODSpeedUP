@@ -30,4 +30,4 @@ class Session(Resource):
                 'used': U.used
             }}
         else:
-            abort_msg(404, '账户未登录')
+            return {'status': 200, 'data': None}
