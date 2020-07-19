@@ -20,21 +20,25 @@ def deal_ofb(url):
         return
     if 'Location' in r.headers:
         true_url = r.headers['Location']
-        if true_url[0:1] == '/':
-            true_url = 'https://' + urlparse(url).netloc + true_url
-            # 处理url
-            filename = true_url[true_url.rfind('/') + 1:true_url.rfind('?')]
-            r = s.head(true_url)
-            return {
-                'status': 200,
-                'is_dir': False,
-                'OFB': True,
-                'data': {
-                    'url': build_speedup_link(true_url),
-                    'size': r.headers['Content-Length'],
-                    'name': filename
+        try:
+            if true_url[0:1] == '/':
+                true_url = 'https://' + urlparse(url).netloc + true_url
+                # 处理url
+                filename = true_url[true_url.rfind('/') + 1:true_url.rfind('?')]
+                r = s.head(true_url)
+                return {
+                    'status': 200,
+                    'is_dir': False,
+                    'OFB': True,
+                    'data': {
+                        'url': build_speedup_link(true_url),
+                        'size': r.headers['Content-Length'],
+                        'name': filename
+                    }
                 }
-            }
+        except:
+            abort_msg(500, '分析文件下载链接时出错')
+            return
     try:
         r = s.get(url, allow_redirects=False)
     except:
