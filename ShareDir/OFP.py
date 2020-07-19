@@ -6,6 +6,7 @@ import requests
 from furl import furl
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
+from urllib.parse import unquote
 
 
 def deal_ofp(url):
@@ -21,12 +22,41 @@ def deal_ofp(url):
         url = r.headers['Location']
     except:
         abort_msg(500, '您提交的链接可能不是分享链接或链接不可游客访问或者服务器错误')
+    # 检测是否为文件
+    down_url = url.replace('/redir?', '/download?')
     try:
-        txt = s.get(url).text
+        r_data = s.get(down_url, allow_redirects=False)
+    except:
+        abort_msg(500, '服务器无法连接到微软，请等待修复')
+        return
+    if 'Location' in r_data.headers:
+        try:
+            down_url = r_data.headers['Location']
+            l = down_url.rfind('/')
+            filename = down_url[l+1:]
+            filename = unquote(filename[:filename.rfind('?')], 'utf-8')
+            down_url = down_url[:l]
+            r = s.head(down_url)
+            return {
+                'status': 200,
+                'is_dir': False,
+                'OFB': False,
+                'data': {
+                    'url': build_speedup_link(down_url),
+                    'size': r.headers['Content-Length'],
+                    'name': filename
+                }
+            }
+        except:
+            abort_msg(500, '解析下载链接时出错')
+            return
+    try:
+        r_data = s.get(url, allow_redirects=False)
     except:
         abort_msg(500, '服务器访问链接出错，请等待修复~')
         return
     try:
+        txt = r_data.text
         soup = BeautifulSoup(txt, 'lxml')
         full_url = str(soup.find('noscript').find('meta').get('content'))
         url = full_url[6:]
@@ -72,6 +102,11 @@ class OFP_DIR(Resource):
         if 'items' not in graph_data:
             abort_msg(500, '无法获取这个分享链接的信息，可能是链接授权过期了，返回重新进入试试?')
         result = list()
+        if 'items' not in graph_data:
+            abort_msg(500, '无法获取分享链接的item')
+            return
+        if 'folder' not in graph_data['items'][0]:
+            abort_msg(500, '无法获取链接内的文件')
         for i in graph_data['items'][0]['folder']['children']:
             if 'folder' in i:
                 r = {

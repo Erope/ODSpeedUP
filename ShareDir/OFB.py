@@ -11,8 +11,32 @@ import re
 def deal_ofb(url):
     if not urlparse(url).netloc.endswith('sharepoint.com'):
         abort_msg(403, '输入的链接非OneDrive分享链接')
+    down_url = url + '&download=1'
+    s = requests.session()
     try:
-        r = requests.get(url, allow_redirects=False, )
+        r = s.get(down_url, allow_redirects=False)
+    except:
+        abort_msg(500, '无法请求这个资源，请等待修复')
+        return
+    if 'Location' in r.headers:
+        true_url = r.headers['Location']
+        if true_url[0:1] == '/':
+            true_url = 'https://' + urlparse(url).netloc + true_url
+            # 处理url
+            filename = true_url[true_url.rfind('/') + 1:true_url.rfind('?')]
+            r = s.head(true_url)
+            return {
+                'status': 200,
+                'is_dir': False,
+                'OFB': True,
+                'data': {
+                    'url': build_speedup_link(true_url),
+                    'size': r.headers['Content-Length'],
+                    'name': filename
+                }
+            }
+    try:
+        r = s.get(url, allow_redirects=False)
     except:
         abort_msg(500, '无法请求这个资源，请等待修复')
         return
@@ -87,6 +111,10 @@ class OFB_DIR(Resource):
             abort_msg(500, '请求微软服务器失败...')
             return
         # 缺少错误判断
+        if 'ListData' not in graph_data:
+            abort_msg(500, '文件目录请求失败...')
+        if 'Row' not in graph_data['ListData']:
+            abort_msg(500, '文件目录请求失败')
         result = list()
         for i in graph_data['ListData']['Row']:
             if i['FSObjType'] == '1':
