@@ -1,8 +1,9 @@
 from flask_restful import Resource
 from flask import session, request
-from tools import get_token_from_cache, abort_msg
+from tools import get_token_from_cache, abort_msg, rec_token
 import app_config
 from urllib.parse import urlparse
+from model import Share_URL
 
 from ShareDir.OFB import deal_ofb, OFB_DIR, OFB_DIR_DOWN
 from ShareDir.OFP import deal_ofp, OFP_DIR
@@ -31,3 +32,27 @@ class ShareDir(Resource):
             return deal_ofb(url)
         if urlparse(url).netloc == "1drv.ms":
             return deal_ofp(url)
+
+
+class LocalShare(Resource):
+    def __init__(self):
+        if 'uid' not in session:
+            abort_msg(403, '您未登录，请先登录!')
+
+    def get(self, token):
+        token = rec_token(token)
+        try:
+            S = Share_URL.query.get(token)
+        except:
+            abort_msg(500, '无法访问数据库...')
+            return
+        if not S:
+            abort_msg(404, '此分享链接不存在或已删除!')
+            return
+        r_data = {
+            'status': 200,
+            'data': {
+                'msurl': S.msurl
+            }
+        }
+        return r_data

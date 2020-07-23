@@ -1,9 +1,10 @@
 from flask_restful import Resource, reqparse, abort
 from flask import session, request
-from model import *
 from tools import *
 import requests
 from furl import furl
+import json
+from model import *
 
 
 class LocalFiles(Resource):
@@ -50,6 +51,7 @@ class LocalFiles(Resource):
             f['size'] = i['size']
             f['createdDateTime'] = i['createdDateTime']
             f['lastModifiedDateTime'] = i['lastModifiedDateTime']
+            f['id'] = i['id']
             result.append(f)
         if '@odata.nextLink' in graph_data:
             url = graph_data['@odata.nextLink']
@@ -58,3 +60,57 @@ class LocalFiles(Resource):
             return {'status': 200, 'data': result, 'skiptoken': next}
         else:
             return {'status': 200, 'data': result, 'skiptoken': False}
+
+
+class ShareFiles(Resource):
+    def __init__(self):
+        if 'uid' not in session:
+            abort_msg(403, '您未登录，请先登录!')
+
+    def post(self, itemId):
+        token = get_token_from_cache(app_config.SCOPE)
+        if not token:
+            abort_msg(500, '未能查询到您的token，请退出登录后重新登录...')
+        # 判断itemId是否为字符串
+        if not itemId.isalnum():
+            abort_msg(500, 'itemId只能为数字和字母')
+        url = "https://graph.microsoft.com/v1.0/me/drive/items/%s/createLink" % itemId
+        headers = {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token['access_token']}
+        data = {
+            'type': 'view',
+            'scope': 'anonymous'
+        }
+        try:
+            r = requests.post(url=url, headers=headers, data=json.dumps(data)).json()
+        except:
+            abort_msg(500, '请求微软服务器错误')
+            return
+        msurl = r['link']['webUrl']
+        # 插入数据库
+        S = Share_URL.query.filter_by(msurl=msurl, uid=session['uid']).first()
+        if S is None:
+            # 添加新URL
+            try:
+                S = Share_URL()
+                S.msurl = msurl
+                S.uid = session['uid']
+                db.session.add(S)
+                db.session.flush()
+                if S.sid < 0:
+                    raise BaseException
+                db.session.commit()
+            except:
+                db.session.rollback()
+                abort_msg(500, '添加分享链接到数据库时失败...')
+        sid = S.sid
+        # 取sid转换
+        token = create_token(sid)
+        r_data = {
+            'status': 200,
+            'data':
+                {
+                    'msurl': msurl,
+                    'token': token
+            }
+        }
+        return r_data
