@@ -17,3 +17,7 @@ def init_url():
     api.add_resource(ShareDir.app.OFB_DIR_DOWN, '/api/ofbdown/<string:host_header>/<string:dirver>/<string:item>')
     api.add_resource(ShareDir.app.OFP_DIR, '/api/ofpsharedir/<string:cid>/<string:id>/<string:authkey>')
     api.add_resource(ShareDir.app.LocalShare, '/api/sharetoken/<string:token>')
+
+    import Offline_Download.app
+    api.add_resource(Offline_Download.app.Offline_Down, '/api/offlinedown/<path:path>')
+    api.add_resource(Offline_Download.app.Offline_Down_Task, '/api/offlinedowntask/<int:Did>', '/api/offlinedowntask')
